@@ -5,6 +5,7 @@ use log::{debug, error};
 use once_cell::sync::Lazy;
 use redis::{FromRedisValue, RedisResult, RedisWrite, ToRedisArgs, Value};
 use serde::{Deserialize, Serialize};
+use url::Url;
 
 use crate::{API_URL, S3_BUCKET};
 use crate::cache::{cache_get, cache_set};
@@ -83,9 +84,17 @@ pub async fn list_s3(path: Path<String>, query: Query<QueryParams>) -> actix_web
 
     let files = Some(result.contents.iter().filter_map(|obj| {
         obj.key.strip_prefix(&prefix).map(|filename| {
+
+            let mut url_str = API_URL.clone();
+            if !url_str.ends_with('/') {
+                url_str.push('/');
+            }
+            let mut url = Url::parse(url_str.as_str())?;
+            let joined = url.join(format!("api/download/{}", obj.key))?;
+
             ViewFileResponse {
                 name: filename.to_string(),
-                download_url: Some(format!("{}/api/download/{}", API_URL.clone(), obj.key)),
+                download_url: Some(joined.to_string()),
             }
         })
     }).collect::<Vec<ViewFileResponse>>()).filter(|vec| !vec.is_empty());

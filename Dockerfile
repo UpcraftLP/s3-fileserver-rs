@@ -2,7 +2,7 @@
 
 ARG RUST_VERSION=1.77.0
 ARG NODE_VERSION=20.9.0
-ARG API_URL="http://localhost:3001"
+ARG API_URL="/"
 ARG VERSION="development"
 
 ################################################################################
