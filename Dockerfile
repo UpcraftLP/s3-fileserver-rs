@@ -40,7 +40,7 @@ RUN --mount=type=bind,source=src,target=src \
     --mount=type=cache,target=/usr/local/cargo/registry/ \
 RUSTFLAGS="-C target-feature=-crt-static" \
 cargo build --locked --release && \
-cp target/release/backend /bin/server
+cp target/release/s3-fileserver /bin/server
 
 ################################################################################
 # Build the frontend SPA

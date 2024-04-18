@@ -399,29 +399,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "backend"
-version = "0.1.0"
-dependencies = [
- "actix-cors",
- "actix-files",
- "actix-web",
- "anyhow",
- "built",
- "chrono",
- "dotenvy",
- "env_logger",
- "log",
- "once_cell",
- "redis",
- "regex",
- "rust-s3",
- "serde",
- "serde_json",
- "tokio",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "backtrace"
 version = "0.3.71"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1692,6 +1669,29 @@ name = "ryu"
 version = "1.0.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e86697c916019a8588c99b5fac3cead74ec0b4b819707a682fd4d23fa0ce1ba1"
+
+[[package]]
+name = "s3-fileserver"
+version = "0.0.0"
+dependencies = [
+ "actix-cors",
+ "actix-files",
+ "actix-web",
+ "anyhow",
+ "built",
+ "chrono",
+ "dotenvy",
+ "env_logger",
+ "log",
+ "once_cell",
+ "redis",
+ "regex",
+ "rust-s3",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing-subscriber",
+]
 
 [[package]]
 name = "schannel"
