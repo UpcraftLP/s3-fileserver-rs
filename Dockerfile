@@ -47,7 +47,7 @@ cp target/release/s3-fileserver /bin/server
 
 FROM node:${NODE_VERSION}-alpine AS frontend
 ARG API_URL
-ENV API_URL=$API_URL
+ENV PUBLIC_API_URL=$API_URL
 WORKDIR /usr/src/app
 
 # Download dependencies as a separate step to take advantage of Docker's caching.
@@ -87,8 +87,10 @@ RUN adduser \
     appuser
 USER appuser
 
+ARG API_URL
+
 ENV FRONTEND_PATH="/static"
-ENV API_URL="http://localhost:3001"
+ENV API_URL=$API_URL
 
 # Copy the main executable.
 COPY --from=build /bin/server /bin/
