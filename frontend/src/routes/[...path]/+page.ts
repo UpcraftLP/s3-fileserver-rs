@@ -3,7 +3,12 @@ import { PUBLIC_API_URL } from '$env/static/public';
 
 export const load: PageLoad = async ({ fetch, params: { path } }) => {
 
-    const data = fetch(`${PUBLIC_API_URL}/api/view/${path}`).then((res) => {
+    let url = PUBLIC_API_URL;
+    if (url.endsWith('/')) {
+        url = url.substring(0, url.length - 1);
+    }
+
+    const data = fetch(`${url}/api/view/${path}`).then((res) => {
         if (res.ok) {
             return res.json();
         }
