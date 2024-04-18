@@ -1,5 +1,5 @@
 use std::env;
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::net::Ipv4Addr;
 use std::path::PathBuf;
 
 use actix_cors::Cors;

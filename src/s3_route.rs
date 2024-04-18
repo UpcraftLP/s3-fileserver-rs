@@ -89,8 +89,8 @@ pub async fn list_s3(path: Path<String>, query: Query<QueryParams>) -> actix_web
             if !url_str.ends_with('/') {
                 url_str.push('/');
             }
-            let mut url = Url::parse(url_str.as_str())?;
-            let joined = url.join(format!("api/download/{}", obj.key))?;
+            let url = Url::parse(url_str.as_str()).expect("Invalid API_URL");
+            let joined = url.join(format!("api/download/{}", obj.key).as_str()).expect("Invalid API_URL");
 
             ViewFileResponse {
                 name: filename.to_string(),
