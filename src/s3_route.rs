@@ -1,6 +1,8 @@
 use actix_web::error::ErrorInternalServerError;
 use actix_web::get;
 use actix_web::web::{Json, Path, Query, Redirect};
+use anyhow::Context;
+use chrono::{DateTime, Utc};
 use log::{debug, error};
 use once_cell::sync::Lazy;
 use redis::{FromRedisValue, RedisResult, RedisWrite, ToRedisArgs, Value};
@@ -35,6 +37,8 @@ struct ViewResponse {
 #[derive(Serialize, Deserialize, Clone)]
 struct ViewFileResponse {
     name: String,
+    last_modified: DateTime<Utc>,
+    size: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     download_url: Option<String>,
 }
@@ -92,8 +96,12 @@ pub async fn list_s3(path: Path<String>, query: Query<QueryParams>) -> actix_web
             let url = Url::parse(url_str.as_str()).expect("Invalid API_URL");
             let joined = url.join(format!("api/download/{}", obj.key).as_str()).expect("Invalid API_URL");
 
+            let last_modified = DateTime::parse_from_rfc3339(obj.last_modified.as_str()).with_context(|| format!("Invalid last_modified: {}", obj.last_modified))?.to_utc();
+
             ViewFileResponse {
                 name: filename.to_string(),
+                last_modified,
+                size: obj.size,
                 download_url: Some(joined.to_string()),
             }
         })
