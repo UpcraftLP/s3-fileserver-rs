@@ -1,7 +1,6 @@
 use actix_web::error::ErrorInternalServerError;
 use actix_web::get;
 use actix_web::web::{Json, Path, Query, Redirect};
-use anyhow::Context;
 use chrono::{DateTime, Utc};
 use log::{debug, error};
 use once_cell::sync::Lazy;
@@ -96,7 +95,7 @@ pub async fn list_s3(path: Path<String>, query: Query<QueryParams>) -> actix_web
             let url = Url::parse(url_str.as_str()).expect("Invalid API_URL");
             let joined = url.join(format!("api/download/{}", obj.key).as_str()).expect("Invalid API_URL");
 
-            let last_modified = DateTime::parse_from_rfc3339(obj.last_modified.as_str()).with_context(|| format!("Invalid last_modified: {}", obj.last_modified))?.to_utc();
+            let last_modified = DateTime::parse_from_rfc3339(obj.last_modified.as_str()).expect(format!("Invalid last_modified: {}", obj.last_modified).as_str()).to_utc();
 
             ViewFileResponse {
                 name: filename.to_string(),
