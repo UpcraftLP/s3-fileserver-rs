@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ChevronRight, FileText, Folder } from 'svelte-feathers';
+	import { ChevronRight, FileText, Folder, Layers } from 'svelte-feathers';
 	import byteSize from 'byte-size';
 	import type { PageData } from './$types';
 
@@ -23,7 +23,9 @@
 	<div class="flex flex-col gap-y-4">
 		<!-- Path -->
 		<div class="w-full p-1 border border-zinc-600 bg-zinc-700">
-			<a href="/" class="rounded-sm px-2 py-0.5 align-text-top hover:bg-zinc-600">home</a>
+			<a href="/" class="rounded-sm px-2 py-0.5 align-text-top hover:bg-zinc-600">
+			<Layers class="inline w-6 h-6 align-top" /> Home
+			</a>
 			{#if path.length > 0}
 				{#each trimmedPath.split('/') as pathFragment, i}
 					<a
