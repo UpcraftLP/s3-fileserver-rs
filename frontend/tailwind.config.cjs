@@ -6,7 +6,13 @@ const config = {
 		extend: {}
 	},
 
-	plugins: []
+	plugins: [
+		function({ addVariant }) {
+			addVariant('child', '& > *');
+        	addVariant('child-hover', '& > *:hover');
+        	addVariant('child-focus', '& > *:focus');
+		}
+	]
 };
 
 module.exports = config;
