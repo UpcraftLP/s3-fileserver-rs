@@ -1,15 +1,18 @@
-use actix_web::error::ErrorInternalServerError;
-use actix_web::get;
+use actix_multipart::Multipart;
+use actix_web::{get, HttpResponse, put, Responder};
+use actix_web::error::{ErrorBadRequest, ErrorInternalServerError};
 use actix_web::web::{Json, Path, Query, Redirect};
 use chrono::{DateTime, Utc};
-use log::{debug, error};
+use futures_util::{StreamExt, TryStreamExt};
+use log::{debug, error, info};
 use once_cell::sync::Lazy;
 use redis::{FromRedisValue, RedisResult, RedisWrite, ToRedisArgs, Value};
+use s3::serde_types::Part;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
 use crate::{API_URL, S3_BUCKET};
-use crate::cache::{cache_get, cache_set};
+use crate::cache::{cache_clear, cache_get, cache_set};
 
 #[derive(Deserialize)]
 struct QueryParams {
@@ -52,6 +55,7 @@ impl FromRedisValue for ViewResponse {
         }
     }
 }
+
 impl ToRedisArgs for ViewResponse {
     fn write_redis_args<W>(&self, out: &mut W) where W: ?Sized + RedisWrite {
         let vec = serde_json::to_vec(self).expect("Unable to serialize JSON");
@@ -87,7 +91,6 @@ pub async fn list_s3(path: Path<String>, query: Query<QueryParams>) -> actix_web
 
     let files = Some(result.contents.iter().filter_map(|obj| {
         obj.key.strip_prefix(&prefix).map(|filename| {
-
             let mut url_str = API_URL.clone();
             if !url_str.ends_with('/') {
                 url_str.push('/');
@@ -146,4 +149,63 @@ pub async fn download_s3(path: Path<String>) -> actix_web::Result<Redirect> {
     })?;
 
     Ok(Redirect::to(url).temporary())
+}
+
+#[put("/upload/{path:.*}")]
+pub async fn upload_s3(path: Path<String>, mut payload: Multipart) -> actix_web::Result<impl Responder> {
+    let key = path.into_inner();
+
+    while let Ok(Some(mut field)) = payload.try_next().await {
+        let cd = field.content_disposition();
+
+        if cd.is_form_data() && cd.get_name().unwrap() == "file" {
+
+            let content_type = field.content_type().map(|mt| mt.essence_str()).clone().unwrap_or("text/plain").to_string();
+
+            let result = S3_BUCKET.initiate_multipart_upload(&key, content_type.as_str()).await.map_err(|e| {
+                error!("Error initiating multipart upload for s3://{}/{}: {}", S3_BUCKET.name(), key, e);
+                ErrorInternalServerError("Error initiating multipart upload")
+            })?;
+
+            let mut parts: Vec<Part> = Vec::new();
+            while let Some(chunk) = field.next().await {
+                if parts.len() >= 10000 {
+                    error!("Too many parts for s3://{}/{}", S3_BUCKET.name(), key);
+                    S3_BUCKET.abort_upload(result.key.as_str(), result.upload_id.as_str()).await.map_err(|e| {
+                        error!("Error aborting upload for s3://{}/{}: {}", S3_BUCKET.name(), key, e);
+                    }).ok();
+                    return Err(ErrorInternalServerError("Too many parts"));
+                }
+                match chunk {
+                    Ok(data) => {
+                        let part = S3_BUCKET.put_multipart_chunk(data.to_vec(), result.key.as_str(), parts.len() as u32 + 1, result.upload_id.as_str(), content_type.as_str()).await.map_err(|e| {
+                            error!("Error uploading s3://{}/{}: {}", S3_BUCKET.name(), key, e);
+                            ErrorInternalServerError("Error uploading to S3")
+                        })?;
+                        parts.push(part);
+                        Ok(())
+                    }
+                    Err(e) => {
+                        error!("Error reading chunk: {e}");
+                        S3_BUCKET.abort_upload(result.key.as_str(), result.upload_id.as_str()).await.map_err(|e| {
+                            error!("Error aborting upload for s3://{}/{}: {}", S3_BUCKET.name(), key, e);
+                        }).ok();
+                        Err(ErrorInternalServerError("Error reading chunk"))
+                    }
+                }?;
+            }
+
+            S3_BUCKET.complete_multipart_upload(result.key.as_str(), result.upload_id.as_str(), parts).await.map_err(|e| {
+                error!("Error completing multipart upload for s3://{}/{}: {}", S3_BUCKET.name(), key, e);
+                ErrorInternalServerError("Error completing multipart upload")
+            })?;
+
+            cache_clear().await.ok();
+            info!("Uploaded s3://{}/{}", S3_BUCKET.name(), key);
+
+            return  Ok(HttpResponse::NoContent());
+        }
+    }
+
+    Err(ErrorBadRequest("No 'file' field found in request"))
 }

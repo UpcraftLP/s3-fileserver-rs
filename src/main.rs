@@ -11,7 +11,7 @@ use once_cell::sync::Lazy;
 use s3::{Bucket, Region};
 use s3::creds::Credentials;
 
-use crate::s3_route::{download_s3, list_s3};
+use crate::s3_route::{download_s3, list_s3, upload_s3};
 
 mod s3_route;
 mod cache;
@@ -25,6 +25,8 @@ const ENVIRONMENT: Lazy<&'static str> = Lazy::new(|| option_env!("RUST_ENVIRONME
 
 const FRONTEND_PATH: Lazy<Option<PathBuf>> = Lazy::new(|| env::var("FRONTEND_PATH").ok().map(|path| PathBuf::from(path).canonicalize().expect("Unable to canonicalize FRONTEND_PATH")));
 const API_URL: Lazy<String> = Lazy::new(|| env::var("API_URL").unwrap_or("http://localhost:3001".to_string()));
+
+const API_KEY: Lazy<Option<String>> = Lazy::new(|| env::var("API_KEY").ok());
 
 const S3_BUCKET: Lazy<Bucket> = Lazy::new(|| {
     let s3_region = Region::from_env("S3_REGION", Some("S3_ENDPOINT")).expect("S3_REGION and/or S3_ENDPOINT must be defined");
@@ -83,19 +85,26 @@ async fn main() -> anyhow::Result<()> {
         warn!("API_URL is not defined. Unless you are in a development environment, things are not going to work!");
     }
 
+    if API_KEY.is_some() {
+        log::info!("Found API_KEY, enabling upload API");
+    }
+
     HttpServer::new(|| {
         let cors = Cors::permissive();
+
+        let mut api = web::scope("/api")
+            .service(list_s3)
+            .service(download_s3);
+
+        if API_KEY.is_some() {
+            api = api.service(upload_s3);
+        }
+
         let app = App::new()
             .wrap(cors)
-            .service(web::scope("/api")
-                .service(list_s3)
-                .service(download_s3)
-            )
-            .service(web::scope("/download")
-                .service(list_s3)
-            );
+            .service(api);
 
-        if FRONTEND_PATH.is_some() {
+        return if FRONTEND_PATH.is_some() {
             let files = Files::new("/", FRONTEND_PATH.clone().unwrap())
                 .index_file("index.html")
                 .default_handler(fn_service(|req: ServiceRequest| async {
@@ -106,9 +115,9 @@ async fn main() -> anyhow::Result<()> {
                 }))
                 .prefer_utf8(true);
 
-            return app.service(files);
+            app.service(files)
         } else {
-            return app;
+            app
         }
     })
         .bind((Ipv4Addr::UNSPECIFIED, 3001))?

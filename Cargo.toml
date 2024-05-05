@@ -8,11 +8,13 @@ edition = "2021"
 [dependencies]
 actix-cors = "0.7.0"
 actix-files = { version = "0.6.5", features = ["tokio-uring"] }
+actix-multipart = "0.6.1"
 actix-web = "4.5.1"
 anyhow = "1.0.81"
 chrono = { version = "0.4.37", features = ["serde"] }
 dotenvy = "0.15.7"
 env_logger = "0.11.3"
+futures-util = "0.3.30"
 log = "0.4.21"
 once_cell = "1.19.0"
 redis = "0.25.3"
