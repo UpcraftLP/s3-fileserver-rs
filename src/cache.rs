@@ -36,7 +36,7 @@ pub(crate) async fn cache_del(key: impl ToRedisArgs) -> anyhow::Result<()> {
 pub(crate) async fn cache_clear() -> anyhow::Result<()> {
     if let Some(redis_cache) = REDIS.clone() {
         let mut con = redis_cache.get_connection()?;
-        redis::cmd("FLUSHALL ASYNC").execute(&mut con);
+        redis::cmd("FLUSHALL").arg("ASYNC").execute(&mut con);
     }
 
     Ok(())
