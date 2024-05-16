@@ -7,7 +7,7 @@ use futures_util::{StreamExt, TryStreamExt};
 use log::{debug, error, info};
 use once_cell::sync::Lazy;
 use redis::{FromRedisValue, RedisResult, RedisWrite, ToRedisArgs, Value};
-use s3::serde_types::Part;
+use s3::serde_types::{InitiateMultipartUploadResponse, Part};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -152,7 +152,7 @@ pub async fn download_s3(path: Path<String>) -> actix_web::Result<Redirect> {
 }
 
 #[put("/upload/{path:.*}")]
-pub async fn upload_s3(path: Path<String>, mut payload: Multipart) -> actix_web::Result<impl Responder> {
+pub async fn upload_s3_multipart(path: Path<String>, mut payload: Multipart) -> actix_web::Result<impl Responder> {
     let key = path.into_inner();
 
     while let Ok(Some(mut field)) = payload.try_next().await {
@@ -162,43 +162,88 @@ pub async fn upload_s3(path: Path<String>, mut payload: Multipart) -> actix_web:
 
             let content_type = field.content_type().map(|mt| mt.essence_str()).clone().unwrap_or("text/plain").to_string();
 
-            let result = S3_BUCKET.initiate_multipart_upload(&key, content_type.as_str()).await.map_err(|e| {
-                error!("Error initiating multipart upload for s3://{}/{}: {}", S3_BUCKET.name(), key, e);
-                ErrorInternalServerError("Error initiating multipart upload")
-            })?;
-
+            let mut read_buffer: Vec<u8> = Vec::new();
+            let mut multipart: Option<InitiateMultipartUploadResponse> = None;
             let mut parts: Vec<Part> = Vec::new();
+
             while let Some(chunk) = field.next().await {
-                if parts.len() >= 10000 {
-                    error!("Too many parts for s3://{}/{}", S3_BUCKET.name(), key);
-                    S3_BUCKET.abort_upload(result.key.as_str(), result.upload_id.as_str()).await.map_err(|e| {
-                        error!("Error aborting upload for s3://{}/{}: {}", S3_BUCKET.name(), key, e);
-                    }).ok();
-                    return Err(ErrorInternalServerError("Too many parts"));
-                }
                 match chunk {
                     Ok(data) => {
-                        let part = S3_BUCKET.put_multipart_chunk(data.to_vec(), result.key.as_str(), parts.len() as u32 + 1, result.upload_id.as_str(), content_type.as_str()).await.map_err(|e| {
-                            error!("Error uploading s3://{}/{}: {}", S3_BUCKET.name(), key, e);
-                            ErrorInternalServerError("Error uploading to S3")
-                        })?;
-                        parts.push(part);
+                        read_buffer.extend_from_slice(&data);
+                        if read_buffer.len() >= 5 * 1024 * 1024 {
+                            if multipart.is_none() {
+                                let result = S3_BUCKET.initiate_multipart_upload(&key, content_type.as_str()).await.map_err(|e| {
+                                    error!("Error initiating multipart upload for s3://{}/{}: {}", S3_BUCKET.name(), key, e);
+                                    ErrorInternalServerError("Error initiating multipart upload")
+                                })?;
+                                multipart = Some(result);
+                            }
+
+                            if let Some(mp) = multipart.as_ref() {
+                                if parts.len() >= 10000 {
+                                    error!("Too many parts for s3://{}/{}", S3_BUCKET.name(), key);
+                                    S3_BUCKET.abort_upload(mp.key.as_str(), mp.upload_id.as_str()).await.map_err(|e| {
+                                        error!("Error aborting upload for s3://{}/{}: {}", S3_BUCKET.name(), key, e);
+                                    }).ok();
+                                    return Err(ErrorInternalServerError("Too many parts"));
+                                }
+
+                                let part = S3_BUCKET.put_multipart_chunk(read_buffer.clone(), mp.key.as_str(), parts.len() as u32 + 1, mp.upload_id.as_str(), content_type.as_str()).await.map_err(|e| {
+                                    error!("Error uploading s3://{}/{}: {}", S3_BUCKET.name(), key, e);
+                                    ErrorInternalServerError("Error uploading to S3")
+                                })?;
+                                parts.push(part);
+                                read_buffer.clear();
+                            }
+                            else {
+                                error!("Multipart upload not initiated for s3://{}/{}", S3_BUCKET.name(), key);
+                                return Err(ErrorInternalServerError("Multipart upload not initiated"));
+                            }
+                        }
                         Ok(())
                     }
                     Err(e) => {
                         error!("Error reading chunk: {e}");
-                        S3_BUCKET.abort_upload(result.key.as_str(), result.upload_id.as_str()).await.map_err(|e| {
-                            error!("Error aborting upload for s3://{}/{}: {}", S3_BUCKET.name(), key, e);
-                        }).ok();
+                        if let Some(mp) = multipart.as_ref() {
+                            S3_BUCKET.abort_upload(mp.key.as_str(), mp.upload_id.as_str()).await.map_err(|e| {
+                                error!("Error aborting upload for s3://{}/{}: {}", S3_BUCKET.name(), key, e);
+                            }).ok();
+                        }
                         Err(ErrorInternalServerError("Error reading chunk"))
                     }
                 }?;
             }
 
-            S3_BUCKET.complete_multipart_upload(result.key.as_str(), result.upload_id.as_str(), parts).await.map_err(|e| {
-                error!("Error completing multipart upload for s3://{}/{}: {}", S3_BUCKET.name(), key, e);
-                ErrorInternalServerError("Error completing multipart upload")
-            })?;
+            match multipart {
+                Some(mp) => {
+                    if !read_buffer.is_empty() {
+                        if parts.len() >= 10000 {
+                            error!("Too many parts for s3://{}/{}", S3_BUCKET.name(), key);
+                            S3_BUCKET.abort_upload(mp.key.as_str(), mp.upload_id.as_str()).await.map_err(|e| {
+                                error!("Error aborting upload for s3://{}/{}: {}", S3_BUCKET.name(), key, e);
+                            }).ok();
+                            return Err(ErrorInternalServerError("Too many parts"));
+                        }
+
+                        let part = S3_BUCKET.put_multipart_chunk(read_buffer.clone(), mp.key.as_str(), parts.len() as u32 + 1, mp.upload_id.as_str(), content_type.as_str()).await.map_err(|e| {
+                            error!("Error uploading s3://{}/{}: {}", S3_BUCKET.name(), key, e);
+                            ErrorInternalServerError("Error uploading to S3")
+                        })?;
+                        parts.push(part);
+                    }
+
+                    S3_BUCKET.complete_multipart_upload(mp.key.as_str(), mp.upload_id.as_str(), parts).await.map_err(|e| {
+                        error!("Error completing multipart upload for s3://{}/{}: {}", S3_BUCKET.name(), key, e);
+                        ErrorInternalServerError("Error completing multipart upload")
+                    })?;
+                }
+                None => {
+                    S3_BUCKET.put_object_with_content_type(&key, read_buffer.as_ref(), content_type.as_str()).await.map_err(|e| {
+                        error!("Error uploading s3://{}/{}: {}", S3_BUCKET.name(), key, e);
+                        ErrorInternalServerError("Error uploading to S3")
+                    })?;
+                }
+            }
 
             cache_clear().await.ok();
             info!("Uploaded s3://{}/{}", S3_BUCKET.name(), key);

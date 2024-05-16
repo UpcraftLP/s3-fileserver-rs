@@ -11,7 +11,7 @@ use once_cell::sync::Lazy;
 use s3::{Bucket, Region};
 use s3::creds::Credentials;
 
-use crate::s3_route::{download_s3, list_s3, upload_s3};
+use crate::s3_route::{download_s3, list_s3, upload_s3_multipart};
 
 mod s3_route;
 mod cache;
@@ -97,7 +97,7 @@ async fn main() -> anyhow::Result<()> {
             .service(download_s3);
 
         if API_KEY.is_some() {
-            api = api.service(upload_s3);
+            api = api.service(upload_s3_multipart);
         }
 
         let app = App::new()
